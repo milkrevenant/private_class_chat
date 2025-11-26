@@ -1,0 +1,5 @@
+{
+  "name": "Classroom AI Assistant",
+  "description": "A secure classroom chatbot allowing teachers to set global guidelines and students to chat using their IDs. Supports multiple Gemini models.",
+  "requestFramePermissions": []
+}

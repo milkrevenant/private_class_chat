@@ -1,9 +1,11 @@
+
 import React, { useState, useEffect } from 'react';
 import { ClassroomConfig, User, ChatSession } from '../types';
-import { saveClassroom, getClassroom, getSessionsByClass } from '../services/storageService';
+import { saveClassroom, getClassroom, getSessionsByClass, addFeedbackToMessage } from '../services/storageService';
 import { 
   Save, LogOut, Settings, Key, BookOpen, Copy, Check, LayoutDashboard, 
-  MessageSquare, Users, AlertTriangle, Eye, ChevronRight, ChevronDown, Image as ImageIcon 
+  MessageSquare, Users, AlertTriangle, Eye, ChevronRight, ChevronDown, 
+  Image as ImageIcon, MessageCircle, Send
 } from 'lucide-react';
 
 interface TeacherDashboardProps {
@@ -13,6 +15,42 @@ interface TeacherDashboardProps {
 }
 
 type Tab = 'dashboard' | 'settings' | 'apikey' | 'logs';
+
+// Simple Markdown Renderer Component
+const MarkdownView: React.FC<{ text: string }> = ({ text }) => {
+  // 1. Split by code blocks
+  const parts = text.split(/(```[\s\S]*?```)/g);
+
+  return (
+    <div className="text-sm leading-relaxed whitespace-pre-wrap">
+      {parts.map((part, index) => {
+        if (part.startsWith('```')) {
+          // Code Block
+          const content = part.replace(/^```\w*\n?/, '').replace(/```$/, '');
+          return (
+            <div key={index} className="my-2 p-3 bg-slate-900 text-slate-50 rounded-md font-mono text-xs overflow-x-auto">
+              {content}
+            </div>
+          );
+        } else {
+          // Regular text with inline formatting
+          // Simple bold parser
+          const boldParts = part.split(/(\*\*.*?\*\*)/g);
+          return (
+            <span key={index}>
+              {boldParts.map((subPart, subIndex) => {
+                if (subPart.startsWith('**') && subPart.endsWith('**')) {
+                  return <strong key={subIndex} className="font-bold text-gray-900">{subPart.slice(2, -2)}</strong>;
+                }
+                return subPart;
+              })}
+            </span>
+          );
+        }
+      })}
+    </div>
+  );
+};
 
 const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, initialClassroom, onLogout }) => {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
@@ -27,28 +65,38 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, initialClassr
   const [expandedUser, setExpandedUser] = useState<string | null>(null);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
 
+  // Feedback State
+  const [editingFeedbackId, setEditingFeedbackId] = useState<string | null>(null);
+  const [feedbackText, setFeedbackText] = useState('');
+
   // UI States
   const [saved, setSaved] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showKey, setShowKey] = useState(false);
 
+  // Sync state with storage on mount and updates
   useEffect(() => {
-    // Refresh classroom data
     const current = getClassroom(classroom.code);
-    if (current) setClassroom(current);
-
-    // Refresh logs when tab is active
-    if (activeTab === 'logs') {
-        const sessions = getSessionsByClass(classroom.code);
-        setClassSessions(sessions);
+    if (current) {
+        setClassroom(current);
+        if (apiKey === initialClassroom.apiKey && current.apiKey !== apiKey) {
+            setApiKey(current.apiKey);
+        }
     }
   }, [activeTab, classroom.code]);
+
+  useEffect(() => {
+      if (activeTab === 'logs') {
+          const sessions = getSessionsByClass(classroom.code);
+          setClassSessions(sessions);
+      }
+  }, [activeTab, classroom.code, editingFeedbackId]); // Re-fetch when feedback editing closes
 
   const handleSave = () => {
     const updatedClassroom = {
       ...classroom,
       systemInstruction: instruction,
-      apiKey: apiKey
+      apiKey: apiKey.trim()
     };
     saveClassroom(updatedClassroom);
     setClassroom(updatedClassroom);
@@ -62,7 +110,23 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, initialClassr
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // Group sessions by UserId for the logs view
+  const handleSubmitFeedback = (sessionId: string, messageId: string) => {
+      if (!feedbackText.trim()) return;
+      
+      addFeedbackToMessage(sessionId, messageId, feedbackText);
+      setEditingFeedbackId(null);
+      setFeedbackText('');
+      
+      // Refresh local list immediately
+      const sessions = getSessionsByClass(classroom.code);
+      setClassSessions(sessions);
+  };
+
+  const startFeedback = (messageId: string, currentFeedback: string = '') => {
+      setEditingFeedbackId(messageId);
+      setFeedbackText(currentFeedback);
+  };
+
   const getGroupedSessions = () => {
     const groups: {[key: string]: ChatSession[]} = {};
     classSessions.forEach(s => {
@@ -233,31 +297,89 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, initialClassr
                             </div>
                             <div className="flex-1 overflow-y-auto p-6 bg-slate-50">
                                 {selectedSessionId ? (
-                                    <div className="space-y-4">
+                                    <div className="space-y-6">
                                         {classSessions.find(s => s.id === selectedSessionId)?.messages.map((msg, idx) => (
-                                            <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                                <div className={`max-w-[80%] rounded-lg p-3 text-sm border ${
-                                                    msg.role === 'user' 
-                                                    ? 'bg-white border-indigo-200 text-indigo-900' 
-                                                    : 'bg-white border-gray-200 text-gray-800'
-                                                }`}>
-                                                    <div className="text-xs font-bold mb-1 opacity-50 uppercase tracking-wider">
-                                                        {msg.role === 'user' ? 'Student' : 'AI Model'}
-                                                    </div>
-                                                    <div>{msg.text}</div>
-                                                    {msg.attachment && (
-                                                        <div className="mt-2 border border-gray-100 rounded overflow-hidden">
-                                                            <div className="flex items-center gap-1 text-xs text-gray-500 p-1 bg-gray-50 border-b border-gray-100">
-                                                                <ImageIcon size={12} /> Generated Image
+                                            <div key={msg.id} className="group relative">
+                                                <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                                    <div className={`max-w-[85%] rounded-lg p-3 border shadow-sm relative ${
+                                                        msg.role === 'user' 
+                                                        ? 'bg-white border-indigo-200 text-indigo-900' 
+                                                        : 'bg-white border-gray-200 text-gray-800'
+                                                    }`}>
+                                                        <div className="flex items-center justify-between mb-1">
+                                                            <div className="text-xs font-bold opacity-50 uppercase tracking-wider">
+                                                                {msg.role === 'user' ? 'Student' : 'AI Model'}
                                                             </div>
-                                                            <img 
-                                                              src={`data:image/png;base64,${msg.attachment}`} 
-                                                              alt="Transcript attachment" 
-                                                              className="max-w-full h-auto"
-                                                            />
+                                                            {/* Feedback Button */}
+                                                            <button 
+                                                              onClick={() => startFeedback(msg.id, msg.feedback)}
+                                                              className="opacity-0 group-hover:opacity-100 transition-opacity p-1 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded"
+                                                              title="Add/Edit Feedback"
+                                                            >
+                                                              <MessageCircle size={14} />
+                                                            </button>
                                                         </div>
-                                                    )}
+                                                        
+                                                        {/* Content Renderer */}
+                                                        <MarkdownView text={msg.text} />
+                                                        
+                                                        {msg.attachment && (
+                                                            <div className="mt-2 border border-gray-100 rounded overflow-hidden">
+                                                                <div className="flex items-center gap-1 text-xs text-gray-500 p-1 bg-gray-50 border-b border-gray-100">
+                                                                    <ImageIcon size={12} /> Generated Image
+                                                                </div>
+                                                                <img 
+                                                                  src={`data:image/png;base64,${msg.attachment}`} 
+                                                                  alt="Transcript attachment" 
+                                                                  className="max-w-full h-auto"
+                                                                />
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                 </div>
+
+                                                {/* Teacher Feedback Display */}
+                                                {msg.feedback && editingFeedbackId !== msg.id && (
+                                                    <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} mt-1`}>
+                                                        <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 text-xs p-2 rounded-lg max-w-[80%] flex items-start gap-2 shadow-sm">
+                                                            <MessageCircle size={12} className="mt-0.5 flex-shrink-0" />
+                                                            <div>
+                                                                <span className="font-bold mr-1">Teacher Feedback:</span>
+                                                                {msg.feedback}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {/* Teacher Feedback Input */}
+                                                {editingFeedbackId === msg.id && (
+                                                    <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} mt-2 relative z-10`}>
+                                                        <div className="bg-white border border-indigo-300 p-2 rounded-lg shadow-lg w-full max-w-md">
+                                                            <textarea
+                                                                autoFocus
+                                                                value={feedbackText}
+                                                                onChange={(e) => setFeedbackText(e.target.value)}
+                                                                placeholder="Write your feedback here..."
+                                                                className="w-full text-sm p-2 border border-gray-200 rounded mb-2 focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                                rows={2}
+                                                            />
+                                                            <div className="flex justify-end gap-2">
+                                                                <button 
+                                                                    onClick={() => setEditingFeedbackId(null)}
+                                                                    className="text-xs px-3 py-1 text-gray-500 hover:bg-gray-100 rounded"
+                                                                >
+                                                                    Cancel
+                                                                </button>
+                                                                <button 
+                                                                    onClick={() => handleSubmitFeedback(selectedSessionId!, msg.id)}
+                                                                    className="text-xs px-3 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700 flex items-center gap-1"
+                                                                >
+                                                                    <Send size={12} /> Save
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                )}
                                             </div>
                                         ))}
                                     </div>
@@ -329,6 +451,9 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, initialClassr
                     <Save size={18} />
                     {saved ? 'Settings Saved' : 'Save API Key'}
                  </button>
+                 {apiKey && apiKey !== classroom.apiKey && !saved && (
+                    <span className="ml-4 text-xs text-amber-600 font-bold">You have unsaved changes.</span>
+                 )}
               </div>
             </div>
           )}

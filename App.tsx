@@ -35,6 +35,28 @@ const App: React.FC = () => {
     }
   }, []);
 
+  // Poll for classroom config updates (e.g., API key changes by teacher)
+  useEffect(() => {
+      if (user && classroomConfig) {
+          const checkConfig = () => {
+              const latest = getClassroom(classroomConfig.code);
+              if (latest && (latest.apiKey !== classroomConfig.apiKey || latest.systemInstruction !== classroomConfig.systemInstruction)) {
+                  console.log("Detected classroom config update, reloading...");
+                  setClassroomConfig(latest);
+              }
+          };
+          
+          window.addEventListener('focus', checkConfig);
+          // Also check periodically
+          const interval = setInterval(checkConfig, 2000);
+          
+          return () => {
+              window.removeEventListener('focus', checkConfig);
+              clearInterval(interval);
+          };
+      }
+  }, [user, classroomConfig]);
+
   // Load sessions when user changes
   useEffect(() => {
     if (user && user.role === UserRole.STUDENT) {

@@ -1,3 +1,4 @@
+
 export enum UserRole {
   STUDENT = 'STUDENT',
   TEACHER = 'TEACHER',
@@ -16,6 +17,7 @@ export interface Message {
   text: string;
   timestamp: number;
   attachment?: string; // Base64 string for images
+  feedback?: string; // Teacher's feedback on this specific message
 }
 
 export interface ChatSession {

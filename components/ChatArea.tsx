@@ -1,8 +1,9 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { ChatSession, Message, ModelType } from '../types';
 import { sendMessageToGemini, generateImage } from '../services/geminiService';
 import { saveSession } from '../services/storageService';
-import { Send, Bot, User as UserIcon, Loader2, Sparkles, Zap, AlertCircle, Image as ImageIcon } from 'lucide-react';
+import { Send, Bot, User as UserIcon, Loader2, Sparkles, Zap, AlertCircle, Image as ImageIcon, MessageCircle } from 'lucide-react';
 
 interface ChatAreaProps {
   session: ChatSession;
@@ -10,6 +11,37 @@ interface ChatAreaProps {
   apiKey: string;
   systemInstruction: string;
 }
+
+// Simple Markdown Renderer (Duplicated to avoid complex file structure changes for now)
+const MarkdownView: React.FC<{ text: string }> = ({ text }) => {
+    const parts = text.split(/(```[\s\S]*?```)/g);
+    return (
+      <div className="text-sm leading-relaxed whitespace-pre-wrap">
+        {parts.map((part, index) => {
+          if (part.startsWith('```')) {
+            const content = part.replace(/^```\w*\n?/, '').replace(/```$/, '');
+            return (
+              <div key={index} className="my-2 p-3 bg-slate-900 text-slate-50 rounded-md font-mono text-xs overflow-x-auto">
+                {content}
+              </div>
+            );
+          } else {
+            const boldParts = part.split(/(\*\*.*?\*\*)/g);
+            return (
+              <span key={index}>
+                {boldParts.map((subPart, subIndex) => {
+                  if (subPart.startsWith('**') && subPart.endsWith('**')) {
+                    return <strong key={subIndex} className="font-bold">{subPart.slice(2, -2)}</strong>;
+                  }
+                  return subPart;
+                })}
+              </span>
+            );
+          }
+        })}
+      </div>
+    );
+  };
 
 const ChatArea: React.FC<ChatAreaProps> = ({ session, onUpdateSession, apiKey, systemInstruction }) => {
   const [input, setInput] = useState('');
@@ -38,16 +70,10 @@ const ChatArea: React.FC<ChatAreaProps> = ({ session, onUpdateSession, apiKey, s
   const handleSend = async () => {
     if (!input.trim() || isLoading) return;
     
-    // Safety check for API Key
-    if (!apiKey) {
-        alert("The Teacher has not configured the API Key yet. Please contact them.");
-        return;
-    }
-
+    // 1. Add User Message
     const userText = input.trim();
     setInput('');
-
-    // 1. Add User Message
+    
     const userMsg: Message = {
       id: Date.now().toString(),
       role: 'user',
@@ -55,7 +81,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ session, onUpdateSession, apiKey, s
       timestamp: Date.now(),
     };
 
-    const updatedSession = {
+    let updatedSession = {
       ...session,
       messages: [...session.messages, userMsg],
       title: session.messages.length === 0 ? userText.slice(0, 30) + (userText.length > 30 ? '...' : '') : session.title,
@@ -64,6 +90,24 @@ const ChatArea: React.FC<ChatAreaProps> = ({ session, onUpdateSession, apiKey, s
 
     onUpdateSession(updatedSession);
     saveSession(updatedSession);
+    
+    // Safety check for API Key AFTER adding user message so they see their input
+    if (!apiKey) {
+        const errorMsg: Message = {
+            id: (Date.now() + 1).toString(),
+            role: 'model',
+            text: "⚠️ SYSTEM ERROR: The Teacher has not configured the API Key yet. Please ask your teacher to enter the API Key in the 'API Configuration' tab of the dashboard.",
+            timestamp: Date.now(),
+        };
+        const errorSession = {
+            ...updatedSession,
+            messages: [...updatedSession.messages, errorMsg],
+        };
+        onUpdateSession(errorSession);
+        saveSession(errorSession);
+        return;
+    }
+
     setIsLoading(true);
 
     try {
@@ -192,7 +236,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({ session, onUpdateSession, apiKey, s
         {!apiKey && (
             <div className="bg-amber-50 border border-amber-200 text-amber-800 p-4 rounded-lg flex items-start gap-3 text-sm mb-4">
                 <AlertCircle className="flex-shrink-0 mt-0.5" size={16} />
-                <p><strong>Warning:</strong> The API Key has not been configured by the teacher. Messages will fail to send.</p>
+                <p><strong>Configuration Required:</strong> The teacher has not saved an API Key yet.</p>
             </div>
         )}
 
@@ -206,39 +250,59 @@ const ChatArea: React.FC<ChatAreaProps> = ({ session, onUpdateSession, apiKey, s
         {session.messages.map((msg) => (
           <div
             key={msg.id}
-            className={`flex w-full ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+            className="flex flex-col gap-1 w-full"
           >
-            <div className={`flex max-w-[80%] md:max-w-[70%] gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-              
-              {/* Avatar */}
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 mt-1 ${
-                msg.role === 'user' ? 'bg-indigo-500 text-white' : 'bg-emerald-500 text-white'
-              }`}>
-                {msg.role === 'user' ? <UserIcon size={16} /> : <Bot size={16} />}
-              </div>
-
-              {/* Bubble */}
-              <div
-                className={`p-4 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap shadow-sm overflow-hidden ${
-                  msg.role === 'user'
-                    ? 'bg-indigo-600 text-white rounded-tr-sm'
-                    : 'bg-white text-gray-800 border border-gray-200 rounded-tl-sm'
-                }`}
-              >
-                {msg.text}
+             <div className={`flex w-full ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`flex max-w-[80%] md:max-w-[70%] gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
                 
-                {/* Image Attachment */}
-                {msg.attachment && (
-                  <div className="mt-3 rounded-lg overflow-hidden border border-gray-200">
-                    <img 
-                      src={`data:image/png;base64,${msg.attachment}`} 
-                      alt="Generated Content" 
-                      className="w-full h-auto object-cover max-h-[400px]"
-                    />
-                  </div>
-                )}
-              </div>
-            </div>
+                {/* Avatar */}
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 mt-1 ${
+                    msg.role === 'user' ? 'bg-indigo-500 text-white' : 'bg-emerald-500 text-white'
+                }`}>
+                    {msg.role === 'user' ? <UserIcon size={16} /> : <Bot size={16} />}
+                </div>
+
+                {/* Bubble */}
+                <div
+                    className={`p-4 rounded-2xl text-sm leading-relaxed shadow-sm overflow-hidden ${
+                    msg.role === 'user'
+                        ? 'bg-indigo-600 text-white rounded-tr-sm'
+                        : 'bg-white text-gray-800 border border-gray-200 rounded-tl-sm'
+                    }`}
+                >
+                    <MarkdownView text={msg.text} />
+                    
+                    {/* Image Attachment */}
+                    {msg.attachment && (
+                    <div className="mt-3 rounded-lg overflow-hidden border border-gray-200">
+                        <img 
+                        src={`data:image/png;base64,${msg.attachment}`} 
+                        alt="Generated Content" 
+                        className="w-full h-auto object-cover max-h-[400px]"
+                        />
+                    </div>
+                    )}
+                </div>
+                </div>
+             </div>
+
+             {/* Feedback Display */}
+             {msg.feedback && (
+                 <div className={`flex w-full ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                     <div className={`max-w-[70%] ${msg.role === 'user' ? 'mr-11' : 'ml-11'}`}>
+                        <div className="bg-yellow-50 border border-yellow-200 text-yellow-900 text-xs p-3 rounded-xl rounded-tr-sm shadow-sm relative animate-in fade-in slide-in-from-top-1">
+                             <div className="absolute -top-1.5 right-4 w-3 h-3 bg-yellow-50 border-t border-l border-yellow-200 transform rotate-45"></div>
+                             <div className="flex items-start gap-2">
+                                <MessageCircle size={14} className="mt-0.5 text-yellow-600 flex-shrink-0" />
+                                <div>
+                                    <span className="font-bold block text-yellow-700 mb-0.5">Teacher Feedback:</span>
+                                    {msg.feedback}
+                                </div>
+                             </div>
+                        </div>
+                     </div>
+                 </div>
+             )}
           </div>
         ))}
         {isLoading && (

@@ -1,3 +1,4 @@
+
 import { ChatSession, ClassroomConfig } from '../types';
 
 const STORAGE_KEYS = {
@@ -111,3 +112,21 @@ export const deleteSession = (sessionId: string) => {
     allSessions = allSessions.filter(s => s.id !== sessionId);
     localStorage.setItem(STORAGE_KEYS.SESSIONS, JSON.stringify(allSessions));
 }
+
+// Update a specific message with feedback (for Teachers)
+export const addFeedbackToMessage = (sessionId: string, messageId: string, feedback: string) => {
+  const allSessionsStr = localStorage.getItem(STORAGE_KEYS.SESSIONS);
+  let allSessions: ChatSession[] = allSessionsStr ? JSON.parse(allSessionsStr) : [];
+  
+  const sessionIndex = allSessions.findIndex(s => s.id === sessionId);
+  if (sessionIndex === -1) return;
+
+  const session = allSessions[sessionIndex];
+  const msgIndex = session.messages.findIndex(m => m.id === messageId);
+  if (msgIndex === -1) return;
+
+  session.messages[msgIndex].feedback = feedback;
+  allSessions[sessionIndex] = session;
+
+  localStorage.setItem(STORAGE_KEYS.SESSIONS, JSON.stringify(allSessions));
+};
